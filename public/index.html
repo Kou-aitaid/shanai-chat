@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>社内チャット</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <meta name="theme-color" content="#3f0e40" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- ログイン画面 -->
+  <div id="login" class="login-screen">
+    <div class="login-card">
+      <img src="/logo.png" onerror="this.src='/logo.svg'" class="login-logo-img" alt="ロゴ" />
+      <h1>社内チャット</h1>
+      <p class="login-sub" id="auth-sub">メールアドレスでログイン</p>
+      <div id="auth-error" class="auth-error hidden"></div>
+      <input id="auth-name" type="text" placeholder="表示名（例：山田太郎）" autocomplete="name" class="hidden" />
+      <input id="auth-email" type="email" placeholder="メールアドレス（@aitaid.co.jp）" autocomplete="email" />
+      <input id="auth-password" type="password" placeholder="パスワード（6文字以上）" autocomplete="current-password" />
+      <button id="auth-btn">ログイン</button>
+      <p class="auth-toggle">
+        <span id="auth-toggle-text">アカウントをお持ちでない方は</span>
+        <a id="auth-toggle-link">新規登録</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- メインアプリ -->
+  <div id="app" class="app hidden">
+    <!-- 左アイコンレール -->
+    <nav class="rail">
+      <div class="rail-top">
+        <button class="rail-btn active" data-view="home"><span class="rail-ico"></span><span class="rail-label">ホーム</span></button>
+        <button class="rail-btn" data-view="dm"><span class="rail-ico"></span><span class="rail-label">DM</span></button>
+        <button class="rail-btn" data-view="activity"><span class="rail-ico"></span><span class="rail-label">アクティビティ</span></button>
+        <button class="rail-btn" data-view="files"><span class="rail-ico"></span><span class="rail-label">ファイル</span></button>
+        <button class="rail-btn" data-view="more"><span class="rail-ico"></span><span class="rail-label">その他</span></button>
+      </div>
+      <div class="rail-bottom">
+        <button id="theme-toggle" class="rail-icon-btn" title="ダーク/ライト切替"></button>
+        <button id="rail-profile" class="rail-avatar" title="プロフィール">
+          <span class="avatar sm" id="rail-avatar-inner"></span>
+          <span class="presence-dot sm" id="rail-presence"></span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- サイドバー -->
+    <aside class="sidebar">
+      <div class="workspace-header">
+        <img src="/logo.png" onerror="this.src='/logo.svg'" class="workspace-logo" alt="ロゴ" />
+        <span class="workspace-name">社内チャット</span>
+      </div>
+      <div class="search-box">
+        <input id="search-input" type="text" placeholder="🔍 検索" />
+      </div>
+      <div class="sidebar-scroll">
+        <ul class="quick-nav">
+          <li id="nav-threads"><span class="quick-ico"></span> スレッド</li>
+          <li id="nav-activity"><span class="quick-ico"></span> アクティビティ</li>
+          <li id="nav-bookmarks"><span class="quick-ico"></span> ブックマーク</li>
+        </ul>
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">
+            <span>チャンネル</span>
+            <button class="add-btn" id="add-channel" title="チャンネルを追加">＋</button>
+          </div>
+          <ul id="channel-list" class="channel-list"></ul>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">
+            <span>プライベートグループ</span>
+            <button class="add-btn" id="add-group" title="グループを作成">＋</button>
+          </div>
+          <ul id="group-list" class="channel-list"></ul>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-section-title"><span>ダイレクトメッセージ</span></div>
+          <ul id="dm-list" class="channel-list"></ul>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-section-title"><span>メンバー（クリックでDM）</span></div>
+          <ul id="member-list" class="member-list"></ul>
+        </div>
+      </div>
+      <div class="sidebar-footer" id="me-footer" title="プロフィールを編集">
+        <div class="avatar-wrap">
+          <div id="me-avatar" class="avatar"></div>
+          <span id="me-presence" class="presence-dot"></span>
+        </div>
+        <div class="me-info">
+          <span id="me-name"></span>
+          <span id="me-status" class="me-status">アクティブ</span>
+        </div>
+        <span class="me-gear">⚙️</span>
+      </div>
+    </aside>
+
+    <!-- メインエリア -->
+    <main class="main">
+      <header class="channel-header">
+        <div>
+          <span class="channel-header-name" id="current-channel-name"># general</span>
+          <span class="channel-header-topic" id="current-channel-topic"></span>
+        </div>
+        <div class="channel-header-actions">
+          <button id="pin-btn" class="header-btn hidden" title="ピン留めされたメッセージ"></button>
+        </div>
+      </header>
+
+      <div id="messages" class="messages"></div>
+      <div id="typing-indicator" class="typing-indicator"></div>
+
+      <div class="composer">
+        <div id="attach-preview" class="attach-preview"></div>
+        <div class="format-toolbar" data-target="composer-input">
+          <button data-fmt="bold" title="太字 (Ctrl/⌘+B)"><b>B</b></button>
+          <button data-fmt="italic" title="斜体 (Ctrl/⌘+I)"><i>I</i></button>
+          <button data-fmt="strike" title="打ち消し線"><s>S</s></button>
+          <span class="tb-sep"></span>
+          <button data-fmt="link" title="リンク">🔗</button>
+          <button data-fmt="ol" title="番号付きリスト">1.</button>
+          <button data-fmt="ul" title="箇条書き">•</button>
+          <span class="tb-sep"></span>
+          <button data-fmt="code" title="コード">&lt;/&gt;</button>
+          <button data-fmt="codeblock" title="コードブロック">▤</button>
+        </div>
+        <div class="composer-row">
+          <button class="attach-btn" id="attach-btn" title="ファイルを添付">📎</button>
+          <input type="file" id="file-input" multiple hidden />
+          <textarea id="composer-input" rows="1" placeholder="メッセージを入力…（Shift+Enterで送信）"></textarea>
+          <button class="attach-btn" id="emoji-btn" title="絵文字">😀</button>
+          <button class="send-btn" id="send-btn">送信</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- スレッドパネル -->
+    <aside id="thread-panel" class="thread-panel hidden">
+      <div class="thread-header">
+        <span>スレッド</span>
+        <button id="thread-close" class="icon-btn">✕</button>
+      </div>
+      <div id="thread-parent" class="thread-parent"></div>
+      <div id="thread-messages" class="messages thread-messages"></div>
+      <div class="composer">
+        <div id="thread-attach-preview" class="attach-preview"></div>
+        <div class="format-toolbar" data-target="thread-input">
+          <button data-fmt="bold" title="太字 (Ctrl/⌘+B)"><b>B</b></button>
+          <button data-fmt="italic" title="斜体 (Ctrl/⌘+I)"><i>I</i></button>
+          <button data-fmt="strike" title="打ち消し線"><s>S</s></button>
+          <span class="tb-sep"></span>
+          <button data-fmt="link" title="リンク">🔗</button>
+          <button data-fmt="ol" title="番号付きリスト">1.</button>
+          <button data-fmt="ul" title="箇条書き">•</button>
+          <span class="tb-sep"></span>
+          <button data-fmt="code" title="コード">&lt;/&gt;</button>
+          <button data-fmt="codeblock" title="コードブロック">▤</button>
+        </div>
+        <div class="composer-row">
+          <button class="attach-btn" id="thread-attach-btn" title="ファイルを添付">📎</button>
+          <input type="file" id="thread-file-input" multiple hidden />
+          <textarea id="thread-input" rows="1" placeholder="スレッドに返信…（Shift+Enterで送信）"></textarea>
+          <button class="attach-btn" id="thread-emoji-btn" title="絵文字">😀</button>
+          <button class="send-btn" id="thread-send-btn">送信</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- モーダル -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# 依存パッケージ
+node_modules/
+
+# データベース（会話ログ・ユーザー）とアップロードファイル
+data.db
+data.db-wal
+data.db-shm
+uploads/
+
+# OS・エディタ
+.DS_Store
+*.log
+npm-debug.log*
+
+# 環境変数
+.env

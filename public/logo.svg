@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" rx="36" fill="#ffffff"/>
+  <!-- 赤い @ マーク -->
+  <g fill="none" stroke="#c8352f" stroke-width="12" stroke-linecap="round">
+    <circle cx="100" cy="74" r="30"/>
+    <path d="M100 74 m18 0 a18 18 0 1 1 -6 -13" transform="translate(-18,0)"/>
+  </g>
+  <circle cx="100" cy="74" r="10" fill="#c8352f"/>
+  <!-- AITD ワードマーク -->
+  <text x="100" y="152" font-family="'Hiragino Sans','Segoe UI',sans-serif" font-size="52" font-weight="800" fill="#111" text-anchor="middle" letter-spacing="1">AITD</text>
+</svg>
