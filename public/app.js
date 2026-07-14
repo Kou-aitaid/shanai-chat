@@ -80,6 +80,7 @@ const ICONS = {
   codeBlock: "<rect x='3' y='3' width='18' height='18' rx='2'/><path d='M10 10l-2 2 2 2'/><path d='M14 10l2 2-2 2'/>",
   home: "<path d='M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/><polyline points='9 22 9 12 15 12 15 22'/>",
   moon: "<path d='M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'/>",
+  menu: "<line x1='3' y1='6' x2='21' y2='6'/><line x1='3' y1='12' x2='21' y2='12'/><line x1='3' y1='18' x2='21' y2='18'/>",
   sun: "<circle cx='12' cy='12' r='5'/><line x1='12' y1='1' x2='12' y2='3'/><line x1='12' y1='21' x2='12' y2='23'/><line x1='4.22' y1='4.22' x2='5.64' y2='5.64'/><line x1='18.36' y1='18.36' x2='19.78' y2='19.78'/><line x1='1' y1='12' x2='3' y2='12'/><line x1='21' y1='12' x2='23' y2='12'/><line x1='4.22' y1='19.78' x2='5.64' y2='18.36'/><line x1='18.36' y1='5.64' x2='19.78' y2='4.22'/>",
 };
 function icon(name, size = 18) {
@@ -163,7 +164,7 @@ async function showApp() {
   renderMe();
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   socket.emit('auth', { token });
-  socket.on('connect', () => socket.emit('auth', { token }));
+  setupConnection();
   applyStaticIcons();
   bookmarkedIds = new Set(await (await api('/api/bookmark-ids')).json());
   await loadUsers();
@@ -189,6 +190,7 @@ function applyStaticIcons() {
   set('#add-channel', 'plus', 16);
   set('#add-group', 'plus', 16);
   set('#pin-btn', 'pin', 18);
+  set('#menu-btn', 'menu', 22);
   // クイックナビ
   const qn = { '#nav-threads': 'message', '#nav-activity': 'atSign', '#nav-bookmarks': 'bookmark' };
   for (const [sel, name] of Object.entries(qn)) { const s = $(sel)?.querySelector('.quick-ico'); if (s) s.innerHTML = icon(name, 16); }
@@ -218,6 +220,58 @@ function setupRail() {
   $('#theme-toggle').onclick = toggleTheme;
   $('#rail-profile').onclick = openProfileModal;
   renderRailAvatar();
+  setupDrawer();
+  setupResizers();
+}
+
+// ==================== モバイルのドロワー ====================
+function setupDrawer() {
+  $('#menu-btn').onclick = () => document.getElementById('app').classList.toggle('drawer-open');
+  $('#drawer-backdrop').onclick = closeDrawer;
+}
+function closeDrawer() { document.getElementById('app').classList.remove('drawer-open'); }
+function isMobile() { return window.matchMedia('(max-width: 720px)').matches; }
+
+// ==================== 幅のドラッグリサイズ ====================
+function setupResizers() {
+  const app = document.getElementById('app');
+  // サイドバー幅
+  const sb = document.querySelector('.sidebar');
+  const savedSb = localStorage.getItem('sidebarWidth');
+  if (savedSb) sb.style.width = savedSb + 'px';
+  makeResizer(sb, 'right', 180, 480, (w) => { sb.style.width = w + 'px'; localStorage.setItem('sidebarWidth', w); });
+  // スレッドパネル幅
+  const tp = document.querySelector('.thread-panel');
+  const savedTp = localStorage.getItem('threadWidth');
+  if (savedTp) tp.style.width = savedTp + 'px';
+  makeResizer(tp, 'left', 300, 640, (w) => { tp.style.width = w + 'px'; localStorage.setItem('threadWidth', w); });
+}
+
+// 要素の端にドラッグ用ハンドルを付ける
+function makeResizer(elm, side, min, max, onResize) {
+  const handle = el('div', 'resize-handle resize-' + side);
+  elm.append(handle);
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    if (isMobile()) return;
+    const startX = e.clientX;
+    const startW = elm.getBoundingClientRect().width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const move = (ev) => {
+      const delta = side === 'right' ? ev.clientX - startX : startX - ev.clientX;
+      const w = Math.max(min, Math.min(max, startW + delta));
+      onResize(w);
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
 }
 
 function setRailActive(view) {
@@ -277,6 +331,25 @@ function updateThemeToggleIcon() {
   btn.title = dark ? 'ライトモードに切替' : 'ダークモードに切替';
 }
 applyTheme(localStorage.getItem('theme') || 'light'); // 起動時に適用
+
+// ==================== テーマカラー（アクセント） ====================
+const ACCENT_PRESETS = [
+  { id: 'aubergine', label: 'オーベルジン', sidebar: '#3f0e40', rail: '#2c0a2d' },
+  { id: 'navy', label: 'ネイビー', sidebar: '#10294e', rail: '#0a1c37' },
+  { id: 'forest', label: 'フォレスト', sidebar: '#0b4a34', rail: '#073123' },
+  { id: 'teal', label: 'ティール', sidebar: '#0b3d40', rail: '#06282a' },
+  { id: 'indigo', label: 'インディゴ', sidebar: '#2b2a5e', rail: '#1c1b40' },
+  { id: 'rose', label: 'ローズ', sidebar: '#5c1030', rail: '#3d0a20' },
+  { id: 'graphite', label: 'グラファイト', sidebar: '#2a2d33', rail: '#1a1c20' },
+];
+function applyAccent(id) {
+  const p = ACCENT_PRESETS.find((x) => x.id === id) || ACCENT_PRESETS[0];
+  document.documentElement.style.setProperty('--sidebar-bg', p.sidebar);
+  document.documentElement.style.setProperty('--rail-bg', p.rail);
+  document.documentElement.style.setProperty('--sidebar-hover', p.rail);
+  localStorage.setItem('accent', p.id);
+}
+applyAccent(localStorage.getItem('accent') || 'aubergine'); // 起動時に適用
 
 // 自分の情報をフッターに反映
 function renderMe() {
@@ -364,6 +437,7 @@ async function selectChannel(channel) {
   unreadChannels.delete(channel.id);
   renderChannels();
   closeThread();
+  if (isMobile()) closeDrawer();
   $('#current-channel-name').innerHTML = channel.is_dm
     ? `${icon('message', 17)} ${esc(channel.dmPeer?.name || 'DM')}`
     : `${icon(channel.is_private ? 'lock' : 'hash', 16)} ${esc(channel.name)}`;
@@ -809,6 +883,10 @@ function setupComposer() {
   tinput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(true); }
   });
+  tinput.addEventListener('input', () => {
+    socket.emit('typing', { channelId: currentChannel?.id, name: me.name, userId: me.id });
+    handleMentionAutocomplete(tinput);
+  });
   $('#thread-attach-btn').onclick = () => $('#thread-file-input').click();
   $('#thread-file-input').addEventListener('change', (e) => handleFiles(e.target.files, true));
   $('#thread-emoji-btn').onclick = (e) => { e.stopPropagation(); showEmojiPicker($('#thread-emoji-btn'), tinput); };
@@ -926,12 +1004,16 @@ function sendMessage(isThread) {
   const attachments = isThread ? pendingThreadAttachments : pendingAttachments;
   const body = input.value.trim();
   if (!body && attachments.length === 0) return;
+  const parentId = isThread ? currentThreadParent.id : null;
+  const channelId = currentChannel.id;
   socket.emit('message:send', {
-    channelId: currentChannel.id,
-    parentId: isThread ? currentThreadParent.id : null,
-    body,
+    channelId, parentId, body,
     attachments: attachments.map((a) => ({ filename: a.filename, stored_name: a.stored_name, mimetype: a.mimetype, size: a.size })),
-  }, (resp) => { if (resp?.error) alert(resp.error); });
+  }, (resp) => {
+    if (resp?.error) { alert(resp.error); return; }
+    // 楽観的更新：ackで返ったメッセージを即描画（message:newと重複はガード）
+    if (resp?.message) receiveMessage({ channelId, parentId, message: resp.message });
+  });
   input.value = '';
   input.style.height = 'auto';
   if (isThread) { pendingThreadAttachments = []; renderAttachPreview(true); }
@@ -939,10 +1021,11 @@ function sendMessage(isThread) {
 }
 
 // ==================== Socket.IO 受信 ====================
-socket.on('message:new', ({ channelId, parentId, message }) => {
-  maybeNotify(channelId, message);
-  // 別チャンネル（または非表示中）に来たら未読マーク
-  if (message.user?.id !== me.id && (channelId !== currentChannel?.id || document.hidden)) {
+// メッセージ受信の共通処理（重複ガードつき。ack・socket両方から呼ばれる）
+function receiveMessage({ channelId, parentId, message }) {
+  const mine = message.user?.id === me.id;
+  // 別チャンネル（または非表示中）に来たら未読マーク＋通知
+  if (!mine && (channelId !== currentChannel?.id || document.hidden)) {
     unreadChannels.add(channelId);
     renderChannels();
   }
@@ -950,20 +1033,67 @@ socket.on('message:new', ({ channelId, parentId, message }) => {
   if (parentId) {
     if (currentThreadParent && parentId === currentThreadParent.id) {
       const box = $('#thread-messages');
-      box.append(renderMessage(message, true));
-      box.scrollTop = box.scrollHeight;
+      if (!box.querySelector(`.message[data-id="${message.id}"]`)) {
+        box.append(renderMessage(message, true));
+        box.scrollTop = box.scrollHeight;
+      }
     }
     updateThreadCount(parentId);
   } else {
     const box = $('#messages');
+    if (box.querySelector(`.message[data-id="${message.id}"]`)) return; // 重複ガード
     box.querySelector('.empty-state')?.remove();
     const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
     box.append(renderMessage(message, false));
-    if (atBottom || message.user?.id === me.id) box.scrollTop = box.scrollHeight;
+    if (atBottom || mine) box.scrollTop = box.scrollHeight;
+    else showNewMessageBanner();
     refreshReadLabels();
-    if (!document.hidden) socket.emit('read', { channelId }); // 見えているので既読に
+    if (!document.hidden) socket.emit('read', { channelId });
   }
+}
+
+socket.on('message:new', ({ channelId, parentId, message }) => {
+  maybeNotify(channelId, message);
+  receiveMessage({ channelId, parentId, message });
 });
+
+// 接続の確立・切断・再接続の管理
+let firstConnect = true;
+function setupConnection() {
+  socket.on('connect', () => {
+    socket.emit('auth', { token }); // ルームに入り直す
+    hideConnBanner();
+    if (!firstConnect && currentChannel) selectChannel(currentChannel); // 切断中の取りこぼしを補完
+    firstConnect = false;
+  });
+  socket.on('disconnect', () => showConnBanner('接続が切れました。再接続しています…'));
+  socket.io.on('reconnect_attempt', () => showConnBanner('再接続しています…'));
+}
+
+function showConnBanner(msg) {
+  let b = $('#conn-banner');
+  if (!b) { b = el('div', 'conn-banner'); b.id = 'conn-banner'; document.body.append(b); }
+  b.textContent = msg;
+  b.classList.add('show');
+}
+function hideConnBanner() { $('#conn-banner')?.classList.remove('show'); }
+
+// 新着メッセージのバナー（下部）
+function showNewMessageBanner() {
+  let b = $('#newmsg-banner');
+  if (!b) {
+    b = el('div', 'newmsg-banner');
+    b.id = 'newmsg-banner';
+    b.innerHTML = `${icon('bell', 14)} 新しいメッセージ`;
+    b.onclick = () => { const box = $('#messages'); box.scrollTop = box.scrollHeight; hideNewMessageBanner(); };
+    document.querySelector('.main').append(b);
+  }
+  b.classList.add('show');
+  // 最下部までスクロールしたら自動で消す
+  const box = $('#messages');
+  box.onscroll = () => { if (box.scrollHeight - box.scrollTop - box.clientHeight < 80) hideNewMessageBanner(); };
+}
+function hideNewMessageBanner() { $('#newmsg-banner')?.classList.remove('show'); }
 
 socket.on('message:update', ({ channelId, message }) => {
   if (channelId !== currentChannel?.id) return;
@@ -1114,6 +1244,10 @@ function openProfileModal() {
       <label><input type="radio" name="notify" value="none" ${me.notifyPref === 'none' ? 'checked' : ''}/> 通知しない</label>
     </div>
     <div class="profile-notice" id="notify-perm"></div>
+    <label>テーマカラー</label>
+    <div class="swatch-row" id="swatch-row">
+      ${ACCENT_PRESETS.map((p) => `<button class="swatch${(localStorage.getItem('accent') || 'aubergine') === p.id ? ' active' : ''}" data-accent="${p.id}" title="${p.label}" style="background:${p.sidebar}"></button>`).join('')}
+    </div>
     <div class="modal-actions">
       <button class="btn-cancel" id="profile-logout">ログアウト</button>
       <button class="btn-cancel" id="profile-cancel">キャンセル</button>
@@ -1121,6 +1255,13 @@ function openProfileModal() {
     </div>`;
   $('#modal-overlay').classList.remove('hidden');
   applyAvatar($('#profile-avatar'), me.avatar);
+  // テーマカラー選択（即時プレビュー）
+  $('#swatch-row').querySelectorAll('.swatch').forEach((b) => {
+    b.onclick = () => {
+      applyAccent(b.dataset.accent);
+      $('#swatch-row').querySelectorAll('.swatch').forEach((x) => x.classList.toggle('active', x === b));
+    };
+  });
 
   let newImage = me.avatar?.image || null;
   let imageChanged = false;
@@ -1416,24 +1557,38 @@ function fileIcon(mimetype, filename) {
 
 function maybeNotify(channelId, message) {
   if (!message.user || message.user.id === me.id) return;
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const mentioned = message.mentions?.includes(me.id);
-  // 通知設定を尊重
   if (me.notifyPref === 'none') return;
   if (me.notifyPref === 'mentions' && !mentioned) return;
   const isVisibleHere = channelId === currentChannel?.id && !document.hidden;
   if (isVisibleHere && !mentioned) return;
   const ch = channels.find((c) => c.id === channelId);
   const chLabel = ch ? (ch.is_dm ? 'DM' : (ch.is_private ? '🔒' : '#') + ch.name) : '';
-  const n = new Notification(`${mentioned ? '📣 ' : ''}${message.user.name}${chLabel ? '・' + chLabel : ''}`, {
-    body: message.body || '📎 ファイルが送信されました',
-    icon: '/icon.svg',
-    tag: channelId,
-  });
-  n.onclick = () => {
-    window.focus();
-    const c = channels.find((x) => x.id === channelId);
-    if (c) selectChannel(c);
-    n.close();
-  };
+  const title = `${message.user.name}${chLabel ? '・' + chLabel : ''}`;
+  const bodyText = message.body || '📎 ファイルが送信されました';
+  // アプリ内バナー（許可がなくても見える）
+  showInAppNotice({ title, body: bodyText, mentioned, avatar: message.user.avatar, channelId });
+  // ブラウザ通知（許可されている場合のみ）
+  if ('Notification' in window && Notification.permission === 'granted') {
+    const n = new Notification(`${mentioned ? '📣 ' : ''}${title}`, { body: bodyText, icon: '/icon.svg', tag: channelId });
+    n.onclick = () => { window.focus(); const c = channels.find((x) => x.id === channelId); if (c) selectChannel(c); n.close(); };
+  }
+}
+
+// アプリ内通知バナー（右上に積む）
+function showInAppNotice({ title, body, mentioned, avatar, channelId }) {
+  let stack = $('#notice-stack');
+  if (!stack) { stack = el('div', 'notice-stack'); stack.id = 'notice-stack'; document.body.append(stack); }
+  const card = el('div', 'notice-card' + (mentioned ? ' mention' : ''));
+  const av = el('div', 'avatar sm');
+  applyAvatar(av, avatar);
+  const txt = el('div', 'notice-text');
+  txt.innerHTML = `<div class="notice-title">${mentioned ? '📣 ' : ''}${esc(title)}</div><div class="notice-body">${esc(body.slice(0, 90))}</div>`;
+  const close = el('button', 'notice-close', icon('x', 14));
+  close.onclick = (e) => { e.stopPropagation(); card.remove(); };
+  card.append(av, txt, close);
+  card.onclick = () => { const c = channels.find((x) => x.id === channelId); if (c) selectChannel(c); card.remove(); };
+  stack.append(card);
+  setTimeout(() => card.classList.add('show'), 10);
+  setTimeout(() => { card.classList.remove('show'); setTimeout(() => card.remove(), 300); }, 6000);
 }

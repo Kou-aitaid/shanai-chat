@@ -30,6 +30,7 @@
 
   <!-- メインアプリ -->
   <div id="app" class="app hidden">
+    <div id="drawer-backdrop" class="drawer-backdrop"></div>
     <!-- 左アイコンレール -->
     <nav class="rail">
       <div class="rail-top">
@@ -102,7 +103,8 @@
     <!-- メインエリア -->
     <main class="main">
       <header class="channel-header">
-        <div>
+        <button id="menu-btn" class="icon-btn menu-btn" title="メニュー"></button>
+        <div class="channel-header-title">
           <span class="channel-header-name" id="current-channel-name"># general</span>
           <span class="channel-header-topic" id="current-channel-topic"></span>
         </div>

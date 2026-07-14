@@ -56,7 +56,7 @@ body {
 
 /* ---------- 左アイコンレール ---------- */
 .rail {
-  width: 68px; background: #2c0a2d; flex-shrink: 0; display: flex; flex-direction: column;
+  width: 68px; background: var(--rail-bg, #2c0a2d); flex-shrink: 0; display: flex; flex-direction: column;
   justify-content: space-between; align-items: center; padding: 10px 0;
 }
 .rail-top { display: flex; flex-direction: column; gap: 4px; width: 100%; align-items: center; }
@@ -94,7 +94,7 @@ body {
 /* ---------- サイドバー ---------- */
 .sidebar {
   width: 260px; background: var(--sidebar-bg); color: var(--sidebar-text);
-  display: flex; flex-direction: column; flex-shrink: 0;
+  display: flex; flex-direction: column; flex-shrink: 0; position: relative;
 }
 .workspace-header {
   padding: 14px 16px; font-weight: 800; font-size: 17px; color: var(--sidebar-text-strong);
@@ -179,7 +179,7 @@ body {
 .quick-ico { font-size: 15px; }
 
 /* ---------- メイン ---------- */
-.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 .channel-header {
   padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center;
 }
@@ -353,7 +353,7 @@ body {
 
 /* ---------- スレッドパネル ---------- */
 .thread-panel {
-  width: 400px; border-left: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0;
+  width: 400px; border-left: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; position: relative;
 }
 .thread-header {
   padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex;
@@ -448,6 +448,53 @@ body {
 .forward-preview { background: var(--hover-bg); border-left: 3px solid var(--border); padding: 10px 12px; border-radius: 6px; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
 .modal select { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
 
+/* ==================== メニュー / ドロワー（モバイル） ==================== */
+.menu-btn { display: none; margin-right: 10px; color: var(--text-muted); }
+.channel-header-title { flex: 1; min-width: 0; }
+.drawer-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 40; }
+
+/* ==================== 幅リサイズハンドル ==================== */
+.resize-handle { position: absolute; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 15; }
+.resize-handle.resize-right { right: -3px; }
+.resize-handle.resize-left { left: -3px; }
+.resize-handle:hover { background: var(--sidebar-active); opacity: .4; }
+
+/* ==================== 接続バナー ==================== */
+.conn-banner {
+  position: fixed; top: 0; left: 50%; transform: translate(-50%, -100%); background: #b23b3b; color: #fff;
+  padding: 7px 18px; border-radius: 0 0 10px 10px; font-size: 13px; z-index: 400; transition: transform .25s;
+}
+.conn-banner.show { transform: translate(-50%, 0); }
+
+/* ==================== 新着メッセージバナー ==================== */
+.newmsg-banner {
+  position: absolute; left: 50%; bottom: 96px; transform: translate(-50%, 20px); background: var(--sidebar-active); color: #fff;
+  padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 700; cursor: pointer; z-index: 20;
+  display: none; align-items: center; gap: 6px; box-shadow: 0 3px 12px rgba(0,0,0,.25);
+}
+.newmsg-banner.show { display: inline-flex; animation: pop-up .25s ease; }
+@keyframes pop-up { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+
+/* ==================== アプリ内通知バナー ==================== */
+.notice-stack { position: fixed; top: 16px; right: 16px; z-index: 350; display: flex; flex-direction: column; gap: 10px; }
+.notice-card {
+  display: flex; align-items: flex-start; gap: 10px; width: 320px; max-width: 86vw; background: #fff; color: var(--text);
+  border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
+  cursor: pointer; transform: translateX(120%); transition: transform .3s;
+}
+.notice-card.show { transform: translateX(0); }
+.notice-card.mention { border-left: 4px solid #e8a200; }
+.notice-text { flex: 1; min-width: 0; }
+.notice-title { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notice-body { font-size: 13px; color: var(--text-muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.notice-close { background: transparent; border: none; cursor: pointer; color: var(--text-muted); padding: 2px; }
+.notice-close:hover { color: var(--text); }
+
+/* ==================== テーマカラー・スウォッチ ==================== */
+.swatch-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; outline: 2px solid var(--border); outline-offset: 1px; }
+.swatch.active { border-color: #fff; outline-color: var(--sidebar-active); outline-width: 3px; }
+
 /* ==================== ダークテーマ ==================== */
 :root[data-theme="dark"] {
   color-scheme: dark;   /* フォーム部品(textarea/input/select)を暗色で描画 */
@@ -505,9 +552,24 @@ body {
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); }
 .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); }
 
-/* モバイル対応 */
+/* ==================== モバイル対応 ==================== */
 @media (max-width: 720px) {
-  .sidebar { width: 68vw; position: absolute; z-index: 50; height: 100%; transition: transform .2s; }
-  .sidebar.collapsed { transform: translateX(-100%); }
-  .thread-panel { position: absolute; right: 0; width: 100%; z-index: 60; background: #fff; height: 100%; }
+  .menu-btn { display: inline-flex; }
+  /* レール＋サイドバーを左からのドロワーに（閉時は完全に画面外） */
+  .rail, .sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 50; height: 100%;
+    transform: translateX(-100%); transition: transform .25s ease;
+  }
+  .sidebar { width: 252px !important; }
+  .app.drawer-open .rail { transform: translateX(0); }
+  .app.drawer-open .sidebar { transform: translateX(68px); }  /* レールの右隣に */
+  .app.drawer-open .drawer-backdrop { display: block; }
+  .resize-handle { display: none; }        /* モバイルはリサイズ無効 */
+
+  .main { width: 100%; flex: 1; }
+  /* スレッドは全画面 */
+  .thread-panel { position: fixed; inset: 0; width: 100% !important; z-index: 60; background: var(--bg); }
+  .notice-stack { left: 8px; right: 8px; }
+  .notice-card { width: auto; }
+  .files-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 }
