@@ -78,18 +78,32 @@ function publicUser(u) {
     avatar: JSON.parse(u.avatar || '{}'),
     notifyPref: u.notify_pref || 'all',
     presence: presenceOf(u),
+    role: u.role || 'member',
+    disabled: !!u.disabled,
   } : null;
 }
 
-// メンション検出：本文中の @名前 を既知ユーザーと突き合わせ、ユーザーIDの配列を返す
+// ユーザーリストのメモリキャッシュ（#16）
+let usersCache = null;
+function allUsersLite() {
+  if (!usersCache) usersCache = db.prepare('SELECT id, name FROM users').all();
+  return usersCache;
+}
+function invalidateUsers() { usersCache = null; }
+
+// メンション検出：完全一致を優先し、無ければ最長の前方一致（#17）
 function findMentions(body) {
   if (!body) return [];
-  const users = db.prepare('SELECT id, name FROM users').all();
+  const users = allUsersLite();
   const ids = new Set();
   const tokens = body.match(/@([^\s@、。！？]+)/g) || [];
   for (const t of tokens) {
     const name = t.slice(1);
-    const hit = users.find((u) => u.name === name || name.startsWith(u.name));
+    let hit = users.find((u) => u.name === name);
+    if (!hit) {
+      const prefixes = users.filter((u) => name.startsWith(u.name));
+      if (prefixes.length) hit = prefixes.sort((a, b) => b.name.length - a.name.length)[0];
+    }
     if (hit) ids.add(hit.id);
   }
   return [...ids];
@@ -146,7 +160,7 @@ function channelForClient(c, meId) {
     const peerId = members.find((id) => id !== meId);
     dmPeer = publicUser(getUser(peerId));
   }
-  return { id: c.id, name: c.name, topic: c.topic, is_private: !!c.is_private, is_dm: !!c.is_dm, members, dmPeer };
+  return { id: c.id, name: c.name, topic: c.topic, is_private: !!c.is_private, is_dm: !!c.is_dm, created_by: c.created_by, members, dmPeer };
 }
 
 // ==================== 認証 ====================
@@ -197,8 +211,11 @@ app.post('/api/register', authLimiter, async (req, res) => {
     color: avatarColors[Math.floor(Math.random() * avatarColors.length)],
   });
   const hash = await bcrypt.hash(password, 10);
-  db.prepare('INSERT INTO users (id, name, email, avatar, password_hash, created_at) VALUES (?,?,?,?,?,?)')
-    .run(id, name, email, avatar, hash, Date.now());
+  // 最初に登録したユーザーを管理者にする（#9）
+  const isFirst = db.prepare('SELECT COUNT(*) AS c FROM users').get().c === 0;
+  db.prepare('INSERT INTO users (id, name, email, avatar, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)')
+    .run(id, name, email, avatar, hash, isFirst ? 'admin' : 'member', Date.now());
+  invalidateUsers();
   const token = issueToken(id);
   res.json({ token, user: publicUser(getUser(id)) });
 });
@@ -211,6 +228,7 @@ app.post('/api/login', authLimiter, async (req, res) => {
   if (!user || !user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
     return res.status(401).json({ error: 'メールアドレスまたはパスワードが違います' });
   }
+  if (user.disabled) return res.status(403).json({ error: 'このアカウントは無効化されています。管理者にお問い合わせください' });
   const token = issueToken(user.id);
   res.json({ token, user: publicUser(user) });
 });
@@ -236,6 +254,7 @@ app.post('/api/profile', requireAuth, (req, res) => {
   db.prepare('UPDATE users SET name = ?, notify_pref = ?, away = ?, avatar = ? WHERE id = ?')
     .run(name, notifyPref, away, JSON.stringify(avatar), req.userId);
   const updated = publicUser(getUser(req.userId));
+  invalidateUsers();
   io.emit('user:update', updated); // 全員に反映（名前・アイコン・在席）
   res.json({ user: updated });
 });
@@ -295,6 +314,69 @@ app.post('/api/channels', requireAuth, (req, res) => {
   res.json(channel);
 });
 
+// チャンネルの編集（作成者 or 管理者）＝#7
+app.put('/api/channels/:id', requireAuth, (req, res) => {
+  const ch = getChannel(req.params.id);
+  if (!ch || ch.is_dm) return res.status(400).json({ error: '編集できません' });
+  const u = getUser(req.userId);
+  if (ch.created_by !== req.userId && u.role !== 'admin') return res.status(403).json({ error: '権限がありません' });
+  const name = (req.body.name ?? ch.name).trim() || ch.name;
+  const topic = req.body.topic !== undefined ? req.body.topic : ch.topic;
+  db.prepare('UPDATE channels SET name = ?, topic = ? WHERE id = ?').run(name, topic, ch.id);
+  const updated = channelForClient(getChannel(ch.id), req.userId);
+  io.emit('channel:updated', updated);
+  res.json(updated);
+});
+
+// チャンネルの削除（作成者 or 管理者。general/randomは保護）＝#7
+app.delete('/api/channels/:id', requireAuth, (req, res) => {
+  const ch = getChannel(req.params.id);
+  if (!ch) return res.status(404).json({ error: 'not found' });
+  if (ch.id === 'general' || ch.id === 'random') return res.status(400).json({ error: 'このチャンネルは削除できません' });
+  const u = getUser(req.userId);
+  if (ch.created_by !== req.userId && u.role !== 'admin') return res.status(403).json({ error: '権限がありません' });
+  db.prepare('DELETE FROM channels WHERE id = ?').run(ch.id); // messages/attachments/membersはCASCADE
+  db.prepare('DELETE FROM pins WHERE channel_id = ?').run(ch.id);
+  db.prepare('DELETE FROM channel_reads WHERE channel_id = ?').run(ch.id);
+  io.emit('channel:deleted', { id: ch.id });
+  res.json({ ok: true });
+});
+
+// ==================== 管理者API（#9/#10） ====================
+function requireAdmin(req, res, next) {
+  const u = getUser(req.userId);
+  if (!u || u.role !== 'admin') return res.status(403).json({ error: '管理者のみ実行できます' });
+  next();
+}
+app.get('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
+  res.json(db.prepare('SELECT * FROM users ORDER BY created_at').all().map(publicUser));
+});
+app.post('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
+  const target = getUser(req.params.id);
+  if (!target) return res.status(404).json({ error: 'not found' });
+  const role = ['admin', 'member'].includes(req.body.role) ? req.body.role : target.role;
+  const disabled = req.body.disabled === undefined ? target.disabled : (req.body.disabled ? 1 : 0);
+  // 自分自身の管理者権限剥奪・無効化は防ぐ
+  if (target.id === req.userId && (role !== 'admin' || disabled)) {
+    return res.status(400).json({ error: '自分自身は変更できません' });
+  }
+  db.prepare('UPDATE users SET role = ?, disabled = ? WHERE id = ?').run(role, disabled, target.id);
+  if (disabled) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(target.id); // 無効化で強制ログアウト
+  const updated = publicUser(getUser(target.id));
+  io.emit('user:update', updated);
+  res.json({ user: updated });
+});
+app.post('/api/admin/reset-password', requireAuth, requireAdmin, async (req, res) => {
+  const target = getUser(req.body.userId);
+  if (!target) return res.status(404).json({ error: 'not found' });
+  const pw = req.body.password || '';
+  if (pw.length < 6) return res.status(400).json({ error: 'パスワードは6文字以上にしてください' });
+  const hash = await bcrypt.hash(pw, 10);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, target.id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(target.id); // 再ログインを促す
+  res.json({ ok: true });
+});
+
 // DMを開始（無ければ作成）
 app.post('/api/dm', requireAuth, (req, res) => {
   const targetId = req.body.targetUserId;
@@ -318,14 +400,30 @@ function getChannel(id) {
   return db.prepare('SELECT * FROM channels WHERE id = ?').get(id);
 }
 
+const PAGE_SIZE = 50;
 app.get('/api/channels/:id/messages', requireAuth, (req, res) => {
   const channel = getChannel(req.params.id);
   if (!canAccess(channel, req.userId)) return res.status(403).json({ error: 'アクセス権がありません' });
-  const { parentId } = req.query;
-  const rows = parentId
-    ? db.prepare('SELECT * FROM messages WHERE parent_id = ? ORDER BY created_at ASC').all(parentId)
-    : db.prepare('SELECT * FROM messages WHERE channel_id = ? AND parent_id IS NULL ORDER BY created_at ASC').all(req.params.id);
+  const { parentId, before } = req.query;
+  if (parentId) {
+    // スレッド返信は件数が少ないので全件
+    const rows = db.prepare('SELECT * FROM messages WHERE parent_id = ? ORDER BY created_at ASC').all(parentId);
+    return res.json(rows.map(hydrateMessage));
+  }
+  // トップレベルは新しい順にPAGE_SIZE件（before指定でそれ以前を追加取得）＝#6
+  const params = [req.params.id];
+  let sql = 'SELECT * FROM messages WHERE channel_id = ? AND parent_id IS NULL';
+  if (before) { sql += ' AND created_at < ?'; params.push(Number(before)); }
+  sql += ' ORDER BY created_at DESC LIMIT ?'; params.push(PAGE_SIZE);
+  const rows = db.prepare(sql).all(...params).reverse(); // 昇順に戻す
   res.json(rows.map(hydrateMessage));
+});
+
+// 単一メッセージ取得（返信数の更新などに使用）
+app.get('/api/messages/:id', requireAuth, (req, res) => {
+  const m = getMessage(req.params.id);
+  if (!m || !canAccess(getChannel(m.channel_id), req.userId)) return res.status(404).json({ error: 'not found' });
+  res.json(hydrateMessage(m));
 });
 
 // チャンネルのピン留め一覧
@@ -384,11 +482,24 @@ app.get('/api/channels/:id/reads', requireAuth, (req, res) => {
 
 app.get('/api/search', requireAuth, (req, res) => {
   const q = (req.query.q || '').trim();
-  if (!q) return res.json([]);
-  const rows = db.prepare('SELECT * FROM messages WHERE deleted = 0 AND body LIKE ? ORDER BY created_at DESC LIMIT 50').all(`%${q}%`);
+  const { channel, user, from, to } = req.query;
+  if (!q && !channel && !user) return res.json([]);
+  let sql = 'SELECT * FROM messages WHERE deleted = 0';
+  const params = [];
+  if (q) {
+    const escaped = q.replace(/[%_\\]/g, (c) => '\\' + c); // #20 ワイルドカードをエスケープ
+    sql += " AND body LIKE ? ESCAPE '\\'";
+    params.push(`%${escaped}%`);
+  }
+  if (channel) { sql += ' AND channel_id = ?'; params.push(channel); }
+  if (user) { sql += ' AND user_id = ?'; params.push(user); }
+  if (from) { sql += ' AND created_at >= ?'; params.push(Number(from)); }
+  if (to) { sql += ' AND created_at <= ?'; params.push(Number(to)); }
+  sql += ' ORDER BY created_at DESC LIMIT 100';
+  const rows = db.prepare(sql).all(...params);
   const result = rows
     .filter((m) => canAccess(getChannel(m.channel_id), req.userId))
-    .map((m) => ({ ...hydrateMessage(m), channelName: getChannel(m.channel_id)?.name }));
+    .map((m) => ({ ...hydrateMessage(m), channelName: getChannel(m.channel_id)?.name, channelIsDm: !!getChannel(m.channel_id)?.is_dm }));
   res.json(result);
 });
 
@@ -526,7 +637,8 @@ io.on('connection', (socket) => {
   on('message:delete', ({ messageId }, ack) => {
     const userId = me();
     const msg = getMessage(messageId);
-    if (!msg || msg.user_id !== userId) return ack?.({ error: '削除できません' });
+    const isAdmin = getUser(userId)?.role === 'admin';
+    if (!msg || (msg.user_id !== userId && !isAdmin)) return ack?.({ error: '削除できません' });
     db.prepare('UPDATE messages SET deleted = 1, body = ? WHERE id = ?').run('', messageId);
     db.prepare('DELETE FROM reactions WHERE message_id = ?').run(messageId);
     const updated = hydrateMessage(getMessage(messageId));

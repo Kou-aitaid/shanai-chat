@@ -495,6 +495,36 @@ body {
 .swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; outline: 2px solid var(--border); outline-offset: 1px; }
 .swatch.active { border-color: #fff; outline-color: var(--sidebar-active); outline-width: 3px; }
 
+/* ==================== 画像ライトボックス ==================== */
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 500; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+.lightbox img { max-width: 92vw; max-height: 82vh; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,.5); }
+.lightbox-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; }
+.lightbox-dl { color: #fff; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; background: rgba(255,255,255,.15); padding: 8px 14px; border-radius: 8px; }
+.lightbox-dl:hover { background: rgba(255,255,255,.25); }
+.lightbox-close { background: rgba(255,255,255,.15); border: none; color: #fff; border-radius: 8px; padding: 8px; cursor: pointer; display: inline-flex; }
+.lightbox-close:hover { background: rgba(255,255,255,.25); }
+
+/* ==================== 管理者パネル ==================== */
+.admin-users { max-height: 50vh; overflow-y: auto; margin-top: 8px; }
+.admin-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--border); }
+.admin-info { flex: 1; min-width: 0; }
+.admin-name { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.admin-email { font-size: 12px; color: var(--text-muted); }
+.admin-badge { font-size: 11px; background: var(--sidebar-active); color: #fff; padding: 1px 7px; border-radius: 10px; }
+.admin-badge.off { background: #b23b3b; }
+.admin-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.admin-actions .btn-cancel { padding: 6px 10px; font-size: 12px; }
+.admin-you { font-size: 12px; color: var(--text-muted); }
+.danger-btn { color: #c8352f !important; margin-right: auto; }
+.danger-btn:hover { background: #fde8e8 !important; }
+
+/* ==================== 検索絞り込み ==================== */
+.search-filters { display: flex; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; align-items: center; }
+.search-filters select, .search-filters input { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: var(--bg); color: var(--text); }
+.search-jump { cursor: pointer; }
+.msg-highlight { animation: msg-flash 2s ease; }
+@keyframes msg-flash { 0%, 40% { background: #fff3bf; } 100% { background: transparent; } }
+
 /* ==================== ダークテーマ ==================== */
 :root[data-theme="dark"] {
   color-scheme: dark;   /* フォーム部品(textarea/input/select)を暗色で描画 */

@@ -108,6 +108,15 @@ function ensureColumn(table, column, ddl) {
 ensureColumn('users', 'password_hash', 'password_hash TEXT');
 ensureColumn('users', 'away', 'away INTEGER NOT NULL DEFAULT 0');            // 手動の離席フラグ
 ensureColumn('users', 'notify_pref', "notify_pref TEXT NOT NULL DEFAULT 'all'"); // all | mentions | none
+ensureColumn('users', 'role', "role TEXT NOT NULL DEFAULT 'member'");        // admin | member
+ensureColumn('users', 'disabled', 'disabled INTEGER NOT NULL DEFAULT 0');    // アカウント無効化
+
+// 管理者が一人もいなければ、最古参ユーザーを管理者に昇格（既存DB向けの初期化）
+const adminCount = db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'admin'").get().c;
+if (adminCount === 0) {
+  const first = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
+  if (first) db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(first.id);
+}
 ensureColumn('messages', 'deleted', 'deleted INTEGER NOT NULL DEFAULT 0');
 ensureColumn('channels', 'is_dm', 'is_dm INTEGER NOT NULL DEFAULT 0');
 

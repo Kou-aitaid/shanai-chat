@@ -301,6 +301,7 @@ function openMoreMenu(btn) {
     { ic: 'bookmark', label: 'ブックマーク', fn: showBookmarksView },
     { ic: 'settings', label: 'プロフィール・設定', fn: openProfileModal },
   ];
+  if (me.role === 'admin') items.push({ ic: 'settings', label: '管理者パネル', fn: openAdminPanel });
   for (const it of items) {
     const row = el('div', 'ctx-item');
     row.innerHTML = `<span class="ctx-ico">${icon(it.ic, 16)}</span><span>${it.label}</span>`;
@@ -312,6 +313,86 @@ function openMoreMenu(btn) {
   menu.style.left = (r.right + 6) + 'px';
   menu.style.top = r.top + 'px';
   setTimeout(() => document.addEventListener('click', function h() { menu.remove(); document.removeEventListener('click', h); }), 0);
+}
+
+// チャンネルヘッダーに設定ボタンを表示（作成者 or 管理者）
+function updateChannelHeaderActions(channel) {
+  const actions = document.querySelector('.channel-header-actions');
+  document.getElementById('channel-settings-btn')?.remove();
+  if (!channel || channel.is_dm) return;
+  const canEdit = channel.created_by === me.id || me.role === 'admin';
+  if (!canEdit) return;
+  const btn = el('button', 'header-btn');
+  btn.id = 'channel-settings-btn';
+  btn.innerHTML = icon('settings', 16);
+  btn.title = 'チャンネル設定';
+  btn.onclick = () => openChannelSettings(channel);
+  actions.prepend(btn);
+}
+
+// チャンネル設定（名前・説明の編集、削除）＝#7
+function openChannelSettings(channel) {
+  const modal = $('#modal');
+  const deletable = channel.id !== 'general' && channel.id !== 'random';
+  modal.innerHTML = `
+    <h2>チャンネル設定</h2>
+    <label>名前</label>
+    <input type="text" id="cs-name" value="${esc(channel.name)}" />
+    <label>説明</label>
+    <input type="text" id="cs-topic" value="${esc(channel.topic || '')}" />
+    <div class="modal-actions">
+      ${deletable ? '<button class="btn-cancel danger-btn" id="cs-delete">チャンネルを削除</button>' : ''}
+      <button class="btn-cancel" id="cs-cancel">キャンセル</button>
+      <button class="btn-primary" id="cs-save">保存</button>
+    </div>`;
+  $('#modal-overlay').classList.remove('hidden');
+  $('#cs-cancel').onclick = closeModal;
+  $('#cs-save').onclick = async () => {
+    const res = await api(`/api/channels/${channel.id}`, { method: 'PUT', json: { name: $('#cs-name').value.trim(), topic: $('#cs-topic').value.trim() } });
+    if (res.ok) { closeModal(); toast('保存しました'); } else alert((await res.json()).error || '失敗しました');
+  };
+  if ($('#cs-delete')) $('#cs-delete').onclick = async () => {
+    if (!confirm(`#${channel.name} を削除しますか？メッセージも全て消えます。`)) return;
+    const res = await api(`/api/channels/${channel.id}`, { method: 'DELETE' });
+    if (res.ok) { closeModal(); toast('削除しました'); } else alert((await res.json()).error || '失敗しました');
+  };
+}
+
+// 管理者パネル（#9/#10）
+async function openAdminPanel() {
+  const modal = $('#modal');
+  modal.innerHTML = `<h2>管理者パネル</h2><div id="admin-users" class="admin-users">読み込み中…</div>
+    <div class="modal-actions"><button class="btn-cancel" id="admin-close">閉じる</button></div>`;
+  $('#modal-overlay').classList.remove('hidden');
+  $('#admin-close').onclick = closeModal;
+  const list = await (await api('/api/admin/users')).json();
+  const box = $('#admin-users');
+  box.innerHTML = '';
+  for (const u of list) {
+    const row = el('div', 'admin-row');
+    const av = avatarNode(u, true);
+    const info = el('div', 'admin-info');
+    info.innerHTML = `<div class="admin-name">${esc(u.name)} ${u.role === 'admin' ? '<span class="admin-badge">管理者</span>' : ''} ${u.disabled ? '<span class="admin-badge off">無効</span>' : ''}</div><div class="admin-email">${esc(u.email || '')}</div>`;
+    const actions = el('div', 'admin-actions');
+    if (u.id !== me.id) {
+      const roleBtn = el('button', 'btn-cancel', u.role === 'admin' ? '管理者を解除' : '管理者にする');
+      roleBtn.onclick = async () => { await api(`/api/admin/users/${u.id}`, { method: 'POST', json: { role: u.role === 'admin' ? 'member' : 'admin' } }); openAdminPanel(); };
+      const disBtn = el('button', 'btn-cancel', u.disabled ? '有効化' : '無効化');
+      disBtn.onclick = async () => { await api(`/api/admin/users/${u.id}`, { method: 'POST', json: { disabled: !u.disabled } }); openAdminPanel(); };
+      const pwBtn = el('button', 'btn-cancel', 'PW再設定');
+      pwBtn.onclick = async () => {
+        const pw = prompt(`${u.name} の新しいパスワード（6文字以上）`);
+        if (!pw) return;
+        const res = await api('/api/admin/reset-password', { method: 'POST', json: { userId: u.id, password: pw } });
+        if (res.ok) toast('パスワードを再設定しました'); else alert((await res.json()).error || '失敗しました');
+      };
+      actions.append(roleBtn, disBtn, pwBtn);
+    } else {
+      actions.append(el('span', 'admin-you', 'あなた'));
+    }
+    row.append(av, info, actions);
+    box.append(row);
+  }
 }
 
 function renderRailAvatar() {
@@ -356,6 +437,11 @@ function applyAccent(id) {
   localStorage.setItem('accent', p.id);
 }
 applyAccent(localStorage.getItem('accent') || 'aubergine'); // 起動時に適用
+
+// Service Worker 登録（#21）
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
 
 // 自分の情報をフッターに反映
 function renderMe() {
@@ -448,11 +534,34 @@ async function selectChannel(channel) {
     ? `${icon('message', 17)} ${esc(channel.dmPeer?.name || 'DM')}`
     : `${icon(channel.is_private ? 'lock' : 'hash', 16)} ${esc(channel.name)}`;
   $('#current-channel-topic').textContent = channel.topic || '';
+  updateChannelHeaderActions(channel);
   updatePinButton(channel.id);
   channelReads = await (await api(`/api/channels/${channel.id}/reads`)).json();
   const msgs = await (await api(`/api/channels/${channel.id}/messages`)).json();
   renderMessages(msgs);
   socket.emit('read', { channelId: channel.id }); // 開いたら既読
+}
+
+// 無限スクロール用の状態
+let oldestTs = null, hasMoreOlder = false, loadingOlder = false;
+async function loadOlderMessages() {
+  if (!hasMoreOlder || loadingOlder || !currentChannel || oldestTs == null) return;
+  loadingOlder = true;
+  const box = $('#messages');
+  const prevH = box.scrollHeight;
+  const older = await (await api(`/api/channels/${currentChannel.id}/messages?before=${oldestTs}`)).json();
+  if (older.length) {
+    oldestTs = older[0].created_at;
+    hasMoreOlder = older.length >= 50;
+    const frag = document.createDocumentFragment();
+    for (const m of older) frag.append(renderMessage(m, false));
+    box.prepend(frag);
+    box.scrollTop = box.scrollHeight - prevH; // スクロール位置を維持
+    refreshReadLabels();
+  } else {
+    hasMoreOlder = false;
+  }
+  loadingOlder = false;
 }
 
 // ピン留めボタンの表示更新（件数）
@@ -472,6 +581,15 @@ function renderMessages(msgs) {
   for (const m of msgs) box.append(renderMessage(m, false));
   box.scrollTop = box.scrollHeight;
   refreshReadLabels();
+  // ページネーション状態
+  oldestTs = msgs.length ? msgs[0].created_at : null;
+  hasMoreOlder = msgs.length >= 50;
+  // 上端付近までスクロールしたら過去を読み込む
+  box.onscroll = () => {
+    if (box.scrollTop < 80) loadOlderMessages();
+    hideNewMessageBanner();
+    if (box.scrollHeight - box.scrollTop - box.clientHeight < 80) hideNewMessageBanner();
+  };
 }
 
 // ==================== メッセージ描画 ====================
@@ -630,6 +748,23 @@ function toast(msg) {
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 1800);
 }
 
+// 画像ライトボックス（#23）
+function openLightbox(url, name) {
+  document.querySelector('.lightbox')?.remove();
+  const lb = el('div', 'lightbox');
+  const img = el('img');
+  img.src = url;
+  const bar = el('div', 'lightbox-bar');
+  const dl = el('a', 'lightbox-dl', `${icon('download', 16)} ダウンロード`);
+  dl.href = url; dl.download = name || '';
+  const close = el('button', 'lightbox-close', icon('x', 22));
+  bar.append(dl, close);
+  lb.append(bar, img);
+  lb.onclick = (e) => { if (e.target === lb || e.target === close || close.contains(e.target)) lb.remove(); };
+  document.addEventListener('keydown', function esc(ev) { if (ev.key === 'Escape') { lb.remove(); document.removeEventListener('keydown', esc); } });
+  document.body.append(lb);
+}
+
 // 本文描画：Markdown（太字/斜体/打消/コード/リスト/引用/リンク）＋メンション
 function renderBody(body) {
   const lines = esc(body).split('\n');
@@ -668,6 +803,16 @@ function renderBody(body) {
   return html;
 }
 
+// メンションのユーザー特定：完全一致優先→最長の前方一致（サーバーと同じ規則）
+function matchMentionUser(name) {
+  let hit = users.find((u) => u.name === name);
+  if (!hit) {
+    const prefixes = users.filter((u) => name.startsWith(u.name));
+    if (prefixes.length) hit = prefixes.sort((a, b) => b.name.length - a.name.length)[0];
+  }
+  return hit;
+}
+
 // 行内のMarkdown・メンション・リンクを処理（textはエスケープ済み）
 function inlineMd(text) {
   const tokens = [];
@@ -678,7 +823,7 @@ function inlineMd(text) {
   text = text.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>').replace(/(^|[^_\w])_([^_\n]+)_/g, '$1<em>$2</em>');
   text = text.replace(/~~([^~]+)~~/g, '<del>$1</del>');
   text = text.replace(/@([^\s@、。！？]+)/g, (full, name) => {
-    const hit = users.find((u) => u.name === name || name.startsWith(u.name));
+    const hit = matchMentionUser(name);
     if (!hit) return full;
     const cls = hit.id === me.id ? 'mention mention-self' : 'mention';
     return `<span class="${cls}">@${esc(hit.name)}</span>` + name.slice(hit.name.length);
@@ -781,7 +926,7 @@ function renderAttachments(attachments) {
       const d = el('div', 'attach-image');
       const img = el('img');
       img.src = withToken(a.url);
-      img.onclick = () => window.open(withToken(a.url), '_blank');
+      img.onclick = () => openLightbox(withToken(a.url), a.filename);
       d.append(img);
       box.append(d);
     } else {
@@ -1128,6 +1273,24 @@ socket.on('channel:new', async () => {
   await loadChannels();
 });
 
+socket.on('channel:updated', async (updated) => {
+  await loadChannels();
+  if (currentChannel?.id === updated.id) {
+    const fresh = channels.find((c) => c.id === updated.id);
+    if (fresh) {
+      currentChannel = fresh;
+      $('#current-channel-name').innerHTML = `${icon(fresh.is_private ? 'lock' : 'hash', 16)} ${esc(fresh.name)}`;
+      $('#current-channel-topic').textContent = fresh.topic || '';
+    }
+  }
+});
+
+socket.on('channel:deleted', async ({ id }) => {
+  const wasCurrent = currentChannel?.id === id;
+  await loadChannels();
+  if (wasCurrent) selectChannel(channels.find((c) => c.id === 'general') || channels[0]);
+});
+
 // 在席状態の変化
 socket.on('presence', ({ userId, presence }) => {
   const u = findUser(userId);
@@ -1169,9 +1332,11 @@ function replaceMessage(containerSel, message, inThread) {
 async function updateThreadCount(parentId) {
   const node = document.querySelector(`#messages .message[data-id="${parentId}"]`);
   if (!node) return;
-  const msgs = await (await api(`/api/channels/${currentChannel.id}/messages`)).json();
-  const parent = msgs.find((m) => m.id === parentId);
-  if (parent) { node.replaceWith(renderMessage(parent, false)); refreshReadLabels(); }
+  const res = await api(`/api/messages/${parentId}`);
+  if (!res.ok) return;
+  const parent = await res.json();
+  node.replaceWith(renderMessage(parent, false));
+  refreshReadLabels();
 }
 
 // タブに戻ったら既読を送る
@@ -1503,29 +1668,68 @@ async function showActivityView() {
 
 // ==================== 検索 ====================
 let searchTimer;
+let searchFilters = { channel: '', user: '' };
 $('#search-input').addEventListener('input', (e) => {
   clearTimeout(searchTimer);
   const q = e.target.value.trim();
-  if (!q) { if (currentChannel) selectChannel(currentChannel); return; }
+  if (!q && !searchFilters.channel && !searchFilters.user) { if (currentChannel) selectChannel(currentChannel); return; }
   searchTimer = setTimeout(() => doSearch(q), 300);
 });
 
 async function doSearch(q) {
-  const results = await (await api(`/api/search?q=${encodeURIComponent(q)}`)).json();
-  const box = $('#messages');
-  $('#current-channel-name').textContent = `🔍 「${q}」の検索結果`;
+  currentChannel = null;
+  renderChannels();
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (searchFilters.channel) params.set('channel', searchFilters.channel);
+  if (searchFilters.user) params.set('user', searchFilters.user);
+  const results = await (await api(`/api/search?${params.toString()}`)).json();
+  $('#current-channel-name').innerHTML = `${icon('search', 17)} 検索結果`;
   $('#current-channel-topic').textContent = `${results.length}件`;
+  $('#pin-btn').classList.add('hidden');
+  const box = $('#messages');
+  box.onscroll = null;
   box.innerHTML = '';
+  // 絞り込みバー
+  const chOpts = channels.filter((c) => !c.is_dm).map((c) => `<option value="${c.id}" ${searchFilters.channel === c.id ? 'selected' : ''}>#${esc(c.name)}</option>`).join('');
+  const usrOpts = users.map((u) => `<option value="${u.id}" ${searchFilters.user === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
+  const bar = el('div', 'search-filters');
+  bar.innerHTML = `<span style="font-size:13px;color:var(--text-muted)">絞り込み:</span>
+    <select id="sf-channel"><option value="">全チャンネル</option>${chOpts}</select>
+    <select id="sf-user"><option value="">全ユーザー</option>${usrOpts}</select>`;
+  box.append(bar);
+  bar.querySelector('#sf-channel').onchange = (e) => { searchFilters.channel = e.target.value; doSearch($('#search-input').value.trim()); };
+  bar.querySelector('#sf-user').onchange = (e) => { searchFilters.user = e.target.value; doSearch($('#search-input').value.trim()); };
+
   if (!results.length) {
     box.append(el('div', '', `<div style="padding:40px 20px;color:#888;text-align:center;">見つかりませんでした</div>`));
     return;
   }
   for (const m of results) {
     const node = renderMessage(m, true);
-    const label = el('div', 'search-result-channel', `# ${esc(m.channelName || '')}`);
+    node.classList.add('search-jump');
+    const label = el('div', 'search-result-channel', `${m.channelIsDm ? '💬 DM' : '# ' + esc(m.channelName || '')}`);
     label.style.padding = '0 20px';
     node.querySelector('.message-body-wrap').prepend(label);
+    node.onclick = () => jumpToMessage(m);
     box.append(node);
+  }
+}
+
+// 検索結果からメッセージへジャンプ（チャンネルを開いてハイライト）
+async function jumpToMessage(m) {
+  searchFilters = { channel: '', user: '' };
+  $('#search-input').value = '';
+  const ch = channels.find((c) => c.id === m.channel_id);
+  if (!ch) return;
+  await selectChannel(ch);
+  const node = document.querySelector(`#messages .message[data-id="${m.id}"]`);
+  if (node) {
+    node.scrollIntoView({ block: 'center' });
+    node.classList.add('msg-highlight');
+    setTimeout(() => node.classList.remove('msg-highlight'), 2000);
+  } else {
+    toast('メッセージはこのチャンネルにあります（過去分は上スクロールで表示）');
   }
 }
 
