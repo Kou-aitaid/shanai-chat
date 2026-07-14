@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import multer from 'multer';
 import { nanoid } from 'nanoid';
 import bcrypt from 'bcryptjs';
+import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
@@ -16,21 +17,43 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // 社内メールのドメイン制限
 const ALLOWED_DOMAIN = '@aitaid.co.jp';
+const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // トークン有効期限：30日
 
 const app = express();
+app.set('trust proxy', 1); // Render/Cloudflare等のプロキシ経由で正しいIPを取得
 const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(express.json());
 app.use(express.static(path.join(ROOT, 'public')));
-app.use('/uploads', express.static(UPLOAD_DIR));
 
-// ---- ファイルアップロード設定 ----
+// ---- レート制限（#5） ----
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 600, standardHeaders: true, legacyHeaders: false });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: { error: '試行回数が多すぎます。しばらく待ってください' } });
+app.use('/api/', apiLimiter);
+
+// ---- ファイルアップロード設定（#2 種別チェック） ----
+const BLOCKED_EXT = ['.exe', '.bat', '.cmd', '.com', '.msi', '.sh', '.app', '.scr', '.jar', '.vbs', '.ps1', '.dll', '.deb', '.dmg'];
+const ALLOWED_MIME_PREFIX = ['image/', 'audio/', 'video/', 'text/'];
+const ALLOWED_MIME = new Set([
+  'application/pdf', 'application/zip', 'application/x-zip-compressed', 'application/json', 'application/rtf',
+  'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+]);
+function fileFilter(req, file, cb) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (BLOCKED_EXT.includes(ext)) return cb(new Error('この種類のファイルはアップロードできません'));
+  const mt = file.mimetype || '';
+  const ok = ALLOWED_MIME_PREFIX.some((p) => mt.startsWith(p)) || ALLOWED_MIME.has(mt);
+  if (!ok) return cb(new Error('この種類のファイルはアップロードできません'));
+  cb(null, true);
+}
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => cb(null, `${nanoid()}${path.extname(file.originalname)}`),
 });
-const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MBまで
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 }, fileFilter }); // 50MBまで
 
 // ==================== ヘルパー ====================
 const avatarColors = ['#e91e63', '#9c27b0', '#3f51b5', '#009688', '#ff9800', '#795548', '#607d8b', '#f44336'];
@@ -134,9 +157,20 @@ function issueToken(userId) {
 }
 function userIdFromToken(token) {
   if (!token) return null;
-  const s = db.prepare('SELECT user_id FROM sessions WHERE token = ?').get(token);
-  return s ? s.user_id : null;
+  const s = db.prepare('SELECT user_id, created_at FROM sessions WHERE token = ?').get(token);
+  if (!s) return null;
+  if (Date.now() - s.created_at > SESSION_TTL) { // #1 有効期限切れ
+    db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+    return null;
+  }
+  return s.user_id;
 }
+// 期限切れセッションの定期削除（#1）
+function cleanupSessions() {
+  db.prepare('DELETE FROM sessions WHERE created_at < ?').run(Date.now() - SESSION_TTL);
+}
+cleanupSessions();
+setInterval(cleanupSessions, 24 * 60 * 60 * 1000);
 // REST用ミドルウェア
 function requireAuth(req, res, next) {
   const token = req.headers['x-token'] || req.query.token;
@@ -147,7 +181,7 @@ function requireAuth(req, res, next) {
 }
 
 // 新規登録（@aitaid.co.jp のメールのみ）
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', authLimiter, async (req, res) => {
   let { name, email, password } = req.body;
   name = (name || '').trim();
   email = (email || '').trim().toLowerCase();
@@ -170,7 +204,7 @@ app.post('/api/register', async (req, res) => {
 });
 
 // ログイン
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', authLimiter, async (req, res) => {
   const email = (req.body.email || '').trim().toLowerCase();
   const password = req.body.password || '';
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
@@ -358,20 +392,44 @@ app.get('/api/search', requireAuth, (req, res) => {
   res.json(result);
 });
 
-app.post('/api/upload', requireAuth, upload.array('files', 10), (req, res) => {
-  const files = (req.files || []).map((f) => ({
-    stored_name: f.filename,
-    filename: Buffer.from(f.originalname, 'latin1').toString('utf8'),
-    mimetype: f.mimetype,
-    size: f.size,
-    url: `/uploads/${f.filename}`,
-  }));
-  res.json({ files });
+app.post('/api/upload', requireAuth, (req, res) => {
+  // multerのエラー（種別・サイズ超過）をJSONで返す（#2）
+  upload.array('files', 10)(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'アップロードに失敗しました' });
+    const files = (req.files || []).map((f) => ({
+      stored_name: f.filename,
+      filename: Buffer.from(f.originalname, 'latin1').toString('utf8'),
+      mimetype: f.mimetype,
+      size: f.size,
+      url: `/uploads/${f.filename}`,
+    }));
+    res.json({ files });
+  });
 });
 
+// 添付ファイルの配信（#3 認証必須＋チャンネルのアクセス権チェック）
+function serveUpload(req, res, asDownload) {
+  const uid = userIdFromToken(req.query.token || req.headers['x-token']);
+  if (!uid) return res.status(401).end();
+  const name = path.basename(req.params.name || '');
+  const att = db.prepare(
+    'SELECT a.filename, m.channel_id FROM attachments a JOIN messages m ON m.id = a.message_id WHERE a.stored_name = ?'
+  ).get(name);
+  // メッセージ確定前（プレビュー中）はattがnull。確定済みならチャンネル権限を確認。
+  if (att && !canAccess(getChannel(att.channel_id), uid)) return res.status(403).end();
+  const full = path.join(UPLOAD_DIR, name);
+  if (!fs.existsSync(full)) return res.status(404).end();
+  if (asDownload) res.download(full, att?.filename || name);
+  else res.sendFile(full);
+}
+app.get('/uploads/:name', (req, res) => serveUpload(req, res, false));
+
 app.get('/api/download/:id', (req, res) => {
-  const a = db.prepare('SELECT * FROM attachments WHERE id = ?').get(req.params.id);
+  const uid = userIdFromToken(req.query.token || req.headers['x-token']);
+  if (!uid) return res.status(401).end();
+  const a = db.prepare('SELECT a.*, m.channel_id FROM attachments a JOIN messages m ON m.id = a.message_id WHERE a.id = ?').get(req.params.id);
   if (!a) return res.status(404).end();
+  if (!canAccess(getChannel(a.channel_id), uid)) return res.status(403).end();
   res.download(path.join(UPLOAD_DIR, a.stored_name), a.filename);
 });
 
@@ -414,10 +472,21 @@ io.on('connection', (socket) => {
 
   const me = () => socket.data.userId;
 
-  socket.on('message:send', (payload, ack) => {
-    try {
-      const userId = me();
-      if (!userId) return ack?.({ error: '未認証です' });
+  // 全ソケットイベント共通のエラーハンドラ（#4）
+  const on = (event, handler) => socket.on(event, (payload, ack) => {
+    try { handler(payload, ack); }
+    catch (e) { console.error(`[socket:${event}]`, e); if (typeof ack === 'function') ack({ error: 'サーバーエラー' }); }
+  });
+
+  on('message:send', (payload, ack) => {
+    const userId = me();
+    if (!userId) return ack?.({ error: '未認証です' });
+    // 送信レート制限：10秒あたり20件まで（#5）
+    const t = Date.now();
+    socket.data.msgTimes = (socket.data.msgTimes || []).filter((x) => t - x < 10000);
+    if (socket.data.msgTimes.length >= 20) return ack?.({ error: '送信が多すぎます。少し待ってください' });
+    socket.data.msgTimes.push(t);
+    {
       const { channelId, parentId, body, attachments } = payload;
       const channel = getChannel(channelId);
       if (!canAccess(channel, userId)) return ack?.({ error: 'アクセス権がありません' });
@@ -438,14 +507,11 @@ io.on('connection', (socket) => {
       const msg = hydrateMessage(getMessage(id));
       io.to(`channel:${channelId}`).emit('message:new', { channelId, parentId: parentId || null, message: msg });
       ack?.({ ok: true, message: msg });
-    } catch (e) {
-      console.error(e);
-      ack?.({ error: 'サーバーエラー' });
     }
   });
 
   // メッセージ編集（本人のみ）
-  socket.on('message:edit', ({ messageId, body }, ack) => {
+  on('message:edit', ({ messageId, body }, ack) => {
     const userId = me();
     const msg = getMessage(messageId);
     if (!msg || msg.user_id !== userId || msg.deleted) return ack?.({ error: '編集できません' });
@@ -457,7 +523,7 @@ io.on('connection', (socket) => {
   });
 
   // メッセージ削除（本人のみ・ソフト削除）
-  socket.on('message:delete', ({ messageId }, ack) => {
+  on('message:delete', ({ messageId }, ack) => {
     const userId = me();
     const msg = getMessage(messageId);
     if (!msg || msg.user_id !== userId) return ack?.({ error: '削除できません' });
@@ -468,7 +534,7 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('reaction:toggle', ({ messageId, emoji }) => {
+  on('reaction:toggle', ({ messageId, emoji }) => {
     const userId = me();
     if (!userId) return;
     const msg = getMessage(messageId);
@@ -483,7 +549,7 @@ io.on('connection', (socket) => {
   });
 
   // ピン留めのトグル（チャンネル全員に共有）
-  socket.on('pin:toggle', ({ messageId }, ack) => {
+  on('pin:toggle', ({ messageId }, ack) => {
     const userId = me();
     const msg = getMessage(messageId);
     if (!msg || !canAccess(getChannel(msg.channel_id), userId)) return ack?.({ error: 'できません' });
@@ -496,7 +562,7 @@ io.on('connection', (socket) => {
   });
 
   // ブックマークのトグル（個人）
-  socket.on('bookmark:toggle', ({ messageId }, ack) => {
+  on('bookmark:toggle', ({ messageId }, ack) => {
     const userId = me();
     const msg = getMessage(messageId);
     if (!msg) return ack?.({ error: 'できません' });
@@ -507,7 +573,7 @@ io.on('connection', (socket) => {
   });
 
   // 未読にする（このメッセージ以降を未読扱い）
-  socket.on('markUnread', ({ channelId, beforeTs }) => {
+  on('markUnread', ({ channelId, beforeTs }) => {
     const userId = me();
     if (!userId || !canAccess(getChannel(channelId), userId)) return;
     const at = Math.max(0, (beforeTs || Date.now()) - 1);
@@ -516,7 +582,7 @@ io.on('connection', (socket) => {
   });
 
   // 既読を記録
-  socket.on('read', ({ channelId }) => {
+  on('read', ({ channelId }) => {
     const userId = me();
     if (!userId || !canAccess(getChannel(channelId), userId)) return;
     const now = Date.now();
@@ -525,7 +591,7 @@ io.on('connection', (socket) => {
     io.to(`channel:${channelId}`).emit('read:update', { channelId, userId, at: now });
   });
 
-  socket.on('typing', (payload) => {
+  on('typing', (payload) => {
     if (payload?.channelId) socket.to(`channel:${payload.channelId}`).emit('typing', payload);
   });
 });

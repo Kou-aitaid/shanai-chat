@@ -21,13 +21,19 @@ const el = (tag, cls, html) => {
 };
 const esc = (s) => (s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// /uploads は認証必須なので、トークンをクエリで付与する
+function withToken(url) {
+  if (!url) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+}
+
 // アイコン描画（画像 or 頭文字＋色）
 function applyAvatar(node, avatar) {
   node.innerHTML = '';
   node.style.background = '';
   if (avatar?.image) {
     const img = document.createElement('img');
-    img.src = avatar.image;
+    img.src = withToken(avatar.image);
     img.className = 'avatar-img';
     node.append(img);
   } else {
@@ -774,14 +780,14 @@ function renderAttachments(attachments) {
     if (a.mimetype && a.mimetype.startsWith('image/')) {
       const d = el('div', 'attach-image');
       const img = el('img');
-      img.src = a.url;
-      img.onclick = () => window.open(a.url, '_blank');
+      img.src = withToken(a.url);
+      img.onclick = () => window.open(withToken(a.url), '_blank');
       d.append(img);
       box.append(d);
     } else {
       const card = el('div', 'attach-file');
       const open = el('a', 'attach-file-main');
-      open.href = a.url; open.target = '_blank'; open.rel = 'noopener';
+      open.href = withToken(a.url); open.target = '_blank'; open.rel = 'noopener';
       open.innerHTML = `<span class="file-icon">${icon('file', 22)}</span>
         <span class="file-meta">
           <div class="file-name">${esc(a.filename)}</div>
@@ -989,7 +995,7 @@ function renderAttachPreview(isThread) {
   box.innerHTML = '';
   list.forEach((a, i) => {
     const item = el('div', 'attach-preview-item');
-    if (a.mimetype?.startsWith('image/')) { const img = el('img'); img.src = a.url; item.append(img); }
+    if (a.mimetype?.startsWith('image/')) { const img = el('img'); img.src = withToken(a.url); item.append(img); }
     else item.append(document.createTextNode('📄 '));
     item.append(el('span', '', esc(a.filename)));
     const rm = el('button', '', '✕');
@@ -1380,8 +1386,8 @@ async function showFilesView() {
     const card = el('div', 'file-card');
     const isImg = f.mimetype?.startsWith('image/');
     const thumb = el('a', 'file-thumb');
-    thumb.href = f.url; thumb.target = '_blank'; thumb.rel = 'noopener';
-    if (isImg) { const img = el('img'); img.src = f.url; thumb.append(img); }
+    thumb.href = withToken(f.url); thumb.target = '_blank'; thumb.rel = 'noopener';
+    if (isImg) { const img = el('img'); img.src = withToken(f.url); thumb.append(img); }
     else thumb.innerHTML = icon('file', 34);
     const info = el('div', 'file-info');
     const txt = el('div', 'file-text');
