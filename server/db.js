@@ -98,6 +98,12 @@ CREATE TABLE IF NOT EXISTS bookmarks (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, message_id)
 );
+
+-- ワークスペース全体の設定（key/value）
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
 `);
 
 // ---- 既存DBへのマイグレーション（列が無ければ追加） ----

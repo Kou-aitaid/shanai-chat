@@ -172,6 +172,8 @@ async function showApp() {
   socket.emit('auth', { token });
   setupConnection();
   applyStaticIcons();
+  setupWorkspaceLogo();
+  api('/api/settings').then(async (r) => { if (r.ok) applyWorkspaceLogo((await r.json()).workspaceLogo); });
   bookmarkedIds = new Set(await (await api('/api/bookmark-ids')).json());
   await loadUsers();
   await loadChannels();
@@ -216,6 +218,37 @@ function applyStaticIcons() {
   const railIco = { home: 'home', dm: 'message', activity: 'atSign', files: 'file', more: 'more' };
   document.querySelectorAll('.rail-btn').forEach((b) => { const s = b.querySelector('.rail-ico'); if (s) s.innerHTML = icon(railIco[b.dataset.view], 22); });
   updateThemeToggleIcon();
+}
+
+// ==================== ワークスペースのロゴ ====================
+function applyWorkspaceLogo(url) {
+  const img = document.querySelector('.workspace-logo');
+  if (!img) return;
+  if (url) { img.src = withToken(url); img.onerror = null; }
+  else { img.src = '/logo.png'; img.onerror = function () { this.onerror = null; this.src = '/logo.svg'; }; }
+}
+function setupWorkspaceLogo() {
+  const btn = $('#logo-btn');
+  const input = $('#logo-input');
+  if (!btn || !input) return;
+  // 管理者のみ変更可
+  if (me.role === 'admin') {
+    btn.classList.add('editable');
+    btn.title = 'クリックしてロゴを変更';
+    btn.onclick = () => input.click();
+    input.onchange = async () => {
+      if (!input.files.length) return;
+      const fd = new FormData();
+      fd.append('file', input.files[0]);
+      const res = await api('/api/settings/logo', { method: 'POST', body: fd });
+      if (res.ok) { applyWorkspaceLogo((await res.json()).workspaceLogo); toast('ロゴを変更しました'); }
+      else alert((await res.json()).error || '変更に失敗しました');
+      input.value = '';
+    };
+  } else {
+    btn.style.cursor = 'default';
+    btn.onclick = null;
+  }
 }
 
 // ==================== レール（ビュー切替） ====================
@@ -1284,6 +1317,8 @@ socket.on('channel:updated', async (updated) => {
     }
   }
 });
+
+socket.on('settings:update', ({ workspaceLogo }) => applyWorkspaceLogo(workspaceLogo));
 
 socket.on('channel:deleted', async ({ id }) => {
   const wasCurrent = currentChannel?.id === id;

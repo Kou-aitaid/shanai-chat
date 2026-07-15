@@ -238,6 +238,24 @@ app.get('/api/me', requireAuth, (req, res) => {
   res.json({ user: publicUser(getUser(req.userId)) });
 });
 
+// ==================== ワークスペース設定（ロゴ） ====================
+function getSetting(k) { const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(k); return r ? r.value : null; }
+app.get('/api/settings', requireAuth, (req, res) => {
+  res.json({ workspaceLogo: getSetting('workspace_logo') });
+});
+// ワークスペースのアイコン変更（管理者のみ）
+app.post('/api/settings/logo', requireAuth, requireAdmin, (req, res) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'アップロードに失敗しました' });
+    if (!req.file) return res.status(400).json({ error: '画像を選んでください' });
+    if (!(req.file.mimetype || '').startsWith('image/')) return res.status(400).json({ error: '画像ファイルを選んでください' });
+    const url = `/uploads/${req.file.filename}`;
+    db.prepare('INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('workspace_logo', url);
+    io.emit('settings:update', { workspaceLogo: url });
+    res.json({ workspaceLogo: url });
+  });
+});
+
 // プロフィール更新（名前・アイコン・通知設定・在席）
 app.post('/api/profile', requireAuth, (req, res) => {
   const u = getUser(req.userId);

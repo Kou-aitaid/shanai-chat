@@ -169,7 +169,13 @@ body {
 .presence-dot.off { background: transparent; border-color: #8a8a8a; }
 
 /* ロゴ */
-.workspace-logo { width: 26px; height: 26px; border-radius: 6px; margin-right: 8px; vertical-align: middle; }
+.logo-btn { background: transparent; border: none; padding: 0; margin-right: 8px; cursor: pointer; display: inline-flex; position: relative; border-radius: 6px; }
+.workspace-logo { width: 26px; height: 26px; border-radius: 6px; vertical-align: middle; object-fit: cover; display: block; }
+.logo-btn.editable::after {
+  content: '✎'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.5); color: #fff; font-size: 13px; border-radius: 6px; opacity: 0; transition: opacity .15s;
+}
+.logo-btn.editable:hover::after { opacity: 1; }
 .login-logo-img { width: 72px; height: 72px; border-radius: 16px; box-shadow: 0 4px 14px rgba(0,0,0,.12); }
 
 /* クイックナビ */

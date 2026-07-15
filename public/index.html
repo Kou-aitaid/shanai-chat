@@ -52,7 +52,10 @@
     <!-- サイドバー -->
     <aside class="sidebar">
       <div class="workspace-header">
-        <img src="/logo.png" onerror="this.src='/logo.svg'" class="workspace-logo" alt="ロゴ" />
+        <button id="logo-btn" class="logo-btn" title="ロゴ">
+          <img src="/logo.png" onerror="this.src='/logo.svg'" class="workspace-logo" alt="ロゴ" />
+        </button>
+        <input type="file" id="logo-input" accept="image/*" hidden />
         <span class="workspace-name">社内チャット</span>
       </div>
       <div class="search-box">
