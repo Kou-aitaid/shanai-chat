@@ -1,9 +1,13 @@
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const db = new Database(path.join(__dirname, '..', 'data.db'));
+// データ保存先：DATA_DIR があればそこ（クラウド用の永続ディスク）、無ければプロジェクト直下
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..');
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const db = new Database(path.join(DATA_DIR, 'data.db'));
 
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');

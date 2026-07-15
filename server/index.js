@@ -12,7 +12,9 @@ import db from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
-const UPLOAD_DIR = path.join(ROOT, 'uploads');
+// 添付ファイルの保存先：DATA_DIR配下（クラウドの永続ディスク）、無ければプロジェクト直下
+const DATA_DIR = process.env.DATA_DIR || ROOT;
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // 社内メールのドメイン制限
