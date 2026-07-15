@@ -1,6 +1,6 @@
 // 社内チャット Service Worker（ネットワーク優先＝更新が即反映される）
-const CACHE = 'shanai-chat-v3';
-const ASSETS = ['/', '/index.html', '/styles.css', '/app.js', '/logo.svg', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+const CACHE = 'shanai-chat-v4';
+const ASSETS = ['/', '/index.html', '/styles.css', '/app.js', '/logo.png', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
