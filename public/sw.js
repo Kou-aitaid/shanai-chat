@@ -1,5 +1,5 @@
-// 社内チャット Service Worker（基本キャッシュ＝#21）
-const CACHE = 'shanai-chat-v1';
+// 社内チャット Service Worker（ネットワーク優先＝更新が即反映される）
+const CACHE = 'shanai-chat-v2';
 const ASSETS = ['/', '/index.html', '/styles.css', '/app.js', '/logo.svg', '/manifest.json'];
 
 self.addEventListener('install', (e) => {
@@ -17,16 +17,16 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
+  if (url.origin !== self.location.origin) return; // 外部はそのまま
   // API・アップロード・WebSocketは常にネットワーク（キャッシュしない）
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/') || url.pathname.startsWith('/socket.io/')) return;
-  // 静的資産はキャッシュ優先＋バックグラウンド更新（stale-while-revalidate）
+  // 静的資産はネットワーク優先（最新を取得。失敗時＝オフラインのみキャッシュ）
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      const net = fetch(e.request).then((res) => {
+    fetch(e.request)
+      .then((res) => {
         if (res && res.ok) { const clone = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, clone)); }
         return res;
-      }).catch(() => cached);
-      return cached || net;
-    })
+      })
+      .catch(() => caches.match(e.request))
   );
 });

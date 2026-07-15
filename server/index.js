@@ -94,17 +94,13 @@ function invalidateUsers() { usersCache = null; }
 // メンション検出：完全一致を優先し、無ければ最長の前方一致（#17）
 function findMentions(body) {
   if (!body) return [];
-  const users = allUsersLite();
+  const sorted = [...allUsersLite()].sort((a, b) => b.name.length - a.name.length); // 最長一致優先
   const ids = new Set();
-  const tokens = body.match(/@([^\s@、。！？]+)/g) || [];
-  for (const t of tokens) {
-    const name = t.slice(1);
-    let hit = users.find((u) => u.name === name);
-    if (!hit) {
-      const prefixes = users.filter((u) => name.startsWith(u.name));
-      if (prefixes.length) hit = prefixes.sort((a, b) => b.name.length - a.name.length)[0];
-    }
-    if (hit) ids.add(hit.id);
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== '@') continue;
+    const rest = body.slice(i + 1);
+    const hit = sorted.find((u) => u.name && rest.startsWith(u.name)); // 名前にスペースがあってもOK
+    if (hit) { ids.add(hit.id); i += hit.name.length; }
   }
   return [...ids];
 }
@@ -216,6 +212,7 @@ app.post('/api/register', authLimiter, async (req, res) => {
   db.prepare('INSERT INTO users (id, name, email, avatar, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)')
     .run(id, name, email, avatar, hash, isFirst ? 'admin' : 'member', Date.now());
   invalidateUsers();
+  io.emit('user:update', publicUser(getUser(id))); // 新規ユーザーを全員にリアルタイム反映
   const token = issueToken(id);
   res.json({ token, user: publicUser(getUser(id)) });
 });
@@ -243,8 +240,8 @@ function getSetting(k) { const r = db.prepare('SELECT value FROM settings WHERE 
 app.get('/api/settings', requireAuth, (req, res) => {
   res.json({ workspaceLogo: getSetting('workspace_logo') });
 });
-// ワークスペースのアイコン変更（管理者のみ）
-app.post('/api/settings/logo', requireAuth, requireAdmin, (req, res) => {
+// ワークスペースのアイコン変更（ログイン済みなら誰でも）
+app.post('/api/settings/logo', requireAuth, (req, res) => {
   upload.single('file')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message || 'アップロードに失敗しました' });
     if (!req.file) return res.status(400).json({ error: '画像を選んでください' });

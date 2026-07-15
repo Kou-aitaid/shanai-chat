@@ -9,7 +9,7 @@ let pendingAttachments = [];
 let pendingThreadAttachments = [];
 let currentThreadParent = null;
 let bookmarkedIds = new Set();   // 自分がブックマークしたメッセージID
-let unreadChannels = new Set();  // 未読があるチャンネルID
+let unreadCounts = {};           // チャンネルID → 未読件数
 const socket = io();
 
 const $ = (sel) => document.querySelector(sel);
@@ -168,7 +168,7 @@ async function showApp() {
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
   renderMe();
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  maybeShowNotifyPrompt();
   socket.emit('auth', { token });
   setupConnection();
   applyStaticIcons();
@@ -231,24 +231,19 @@ function setupWorkspaceLogo() {
   const btn = $('#logo-btn');
   const input = $('#logo-input');
   if (!btn || !input) return;
-  // 管理者のみ変更可
-  if (me.role === 'admin') {
-    btn.classList.add('editable');
-    btn.title = 'クリックしてロゴを変更';
-    btn.onclick = () => input.click();
-    input.onchange = async () => {
-      if (!input.files.length) return;
-      const fd = new FormData();
-      fd.append('file', input.files[0]);
-      const res = await api('/api/settings/logo', { method: 'POST', body: fd });
-      if (res.ok) { applyWorkspaceLogo((await res.json()).workspaceLogo); toast('ロゴを変更しました'); }
-      else alert((await res.json()).error || '変更に失敗しました');
-      input.value = '';
-    };
-  } else {
-    btn.style.cursor = 'default';
-    btn.onclick = null;
-  }
+  // ログイン済みなら誰でも変更可
+  btn.classList.add('editable');
+  btn.title = 'クリックしてロゴを変更';
+  btn.onclick = () => input.click();
+  input.onchange = async () => {
+    if (!input.files.length) return;
+    const fd = new FormData();
+    fd.append('file', input.files[0]);
+    const res = await api('/api/settings/logo', { method: 'POST', body: fd });
+    if (res.ok) { applyWorkspaceLogo((await res.json()).workspaceLogo); toast('ロゴを変更しました'); }
+    else alert((await res.json()).error || '変更に失敗しました');
+    input.value = '';
+  };
 }
 
 // ==================== レール（ビュー切替） ====================
@@ -529,7 +524,8 @@ function renderChannels() {
     const li = el('li');
     li.dataset.id = c.id;
     if (currentChannel && c.id === currentChannel.id) li.classList.add('active');
-    if (unreadChannels.has(c.id) && c.id !== currentChannel?.id) li.classList.add('unread');
+    const unread = (unreadCounts[c.id] || 0);
+    if (unread > 0 && c.id !== currentChannel?.id) li.classList.add('unread');
     li.onclick = () => selectChannel(c);
     if (c.is_dm) {
       const peer = c.dmPeer;
@@ -538,13 +534,22 @@ function renderChannels() {
       const pres = findUser(peer?.id)?.presence || peer?.presence || 'offline';
       wrap.append(av, el('span', 'presence-dot sm ' + presenceClass(pres)));
       li.append(wrap, document.createTextNode(peer?.name || 'DM'));
+      if (unread > 0 && c.id !== currentChannel?.id) li.append(el('span', 'unread-badge', String(unread)));
       dmList.append(li);
     } else {
       const prefix = el('span', 'channel-prefix', icon(c.is_private ? 'lock' : 'hash', 15));
       li.append(prefix, document.createTextNode(' ' + c.name));
+      if (unread > 0 && c.id !== currentChannel?.id) li.append(el('span', 'unread-badge', String(unread)));
       (c.is_private ? grList : chList).append(li);
     }
   }
+  updateTitle();
+}
+
+// タブのタイトルに未読合計を出す
+function updateTitle() {
+  const total = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
+  document.title = total > 0 ? `(${total}) 社内チャット` : '社内チャット';
 }
 
 async function startDM(targetUserId) {
@@ -559,7 +564,7 @@ async function startDM(targetUserId) {
 // ==================== チャンネル選択 ====================
 async function selectChannel(channel) {
   currentChannel = channel;
-  unreadChannels.delete(channel.id);
+  delete unreadCounts[channel.id];
   renderChannels();
   closeThread();
   if (isMobile()) closeDrawer();
@@ -744,7 +749,7 @@ function toggleBookmark(messageId) {
 
 function markUnread(m) {
   socket.emit('markUnread', { channelId: m.channel_id, beforeTs: m.created_at });
-  unreadChannels.add(m.channel_id);
+  unreadCounts[m.channel_id] = (unreadCounts[m.channel_id] || 0) + 1;
   renderChannels();
 }
 
@@ -836,14 +841,25 @@ function renderBody(body) {
   return html;
 }
 
-// メンションのユーザー特定：完全一致優先→最長の前方一致（サーバーと同じ規則）
-function matchMentionUser(name) {
-  let hit = users.find((u) => u.name === name);
-  if (!hit) {
-    const prefixes = users.filter((u) => name.startsWith(u.name));
-    if (prefixes.length) hit = prefixes.sort((a, b) => b.name.length - a.name.length)[0];
+// メンション描画：@のあとに続く「既知ユーザー名（スペース込み可）」を最長一致で強調（textはエスケープ済み）
+function replaceMentions(text) {
+  const sorted = users.map((u) => ({ id: u.id, e: esc(u.name) })).sort((a, b) => b.e.length - a.e.length);
+  let out = '', i = 0;
+  while (i < text.length) {
+    if (text[i] === '@') {
+      const rest = text.slice(i + 1);
+      const hit = sorted.find((u) => u.e && rest.startsWith(u.e));
+      if (hit) {
+        const cls = hit.id === me.id ? 'mention mention-self' : 'mention';
+        out += `<span class="${cls}">@${hit.e}</span>`;
+        i += 1 + hit.e.length;
+        continue;
+      }
+    }
+    out += text[i];
+    i++;
   }
-  return hit;
+  return out;
 }
 
 // 行内のMarkdown・メンション・リンクを処理（textはエスケープ済み）
@@ -855,12 +871,7 @@ function inlineMd(text) {
   text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/__([^_]+)__/g, '<strong>$1</strong>');
   text = text.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>').replace(/(^|[^_\w])_([^_\n]+)_/g, '$1<em>$2</em>');
   text = text.replace(/~~([^~]+)~~/g, '<del>$1</del>');
-  text = text.replace(/@([^\s@、。！？]+)/g, (full, name) => {
-    const hit = matchMentionUser(name);
-    if (!hit) return full;
-    const cls = hit.id === me.id ? 'mention mention-self' : 'mention';
-    return `<span class="${cls}">@${esc(hit.name)}</span>` + name.slice(hit.name.length);
-  });
+  text = replaceMentions(text);
   text = text.replace(/(https?:\/\/[^\s<]+)/g, (u) => stash(`<a href="${u}" target="_blank" rel="noopener" class="md-link">${u}</a>`));
   text = text.replace(/\u0000(\d+)\u0000/g, (m, i) => tokens[+i]);
   return text;
@@ -1210,7 +1221,7 @@ function receiveMessage({ channelId, parentId, message }) {
   const mine = message.user?.id === me.id;
   // 別チャンネル（または非表示中）に来たら未読マーク＋通知
   if (!mine && (channelId !== currentChannel?.id || document.hidden)) {
-    unreadChannels.add(channelId);
+    unreadCounts[channelId] = (unreadCounts[channelId] || 0) + 1;
     renderChannels();
   }
   if (channelId !== currentChannel?.id) return;
@@ -1261,6 +1272,20 @@ function showConnBanner(msg) {
   b.classList.add('show');
 }
 function hideConnBanner() { $('#conn-banner')?.classList.remove('show'); }
+
+// 通知が未許可なら、有効化を促すバナーを出す
+function maybeShowNotifyPrompt() {
+  if (!('Notification' in window) || Notification.permission !== 'default') return;
+  if (localStorage.getItem('notifyPromptDismissed')) return;
+  const b = el('div', 'notify-prompt');
+  b.innerHTML = `<span>${icon('bell', 16)} 新着メッセージの通知を受け取りますか？</span>`;
+  const yes = el('button', 'np-yes', '有効にする');
+  const no = el('button', 'np-no', 'あとで');
+  yes.onclick = () => { Notification.requestPermission().finally(() => b.remove()); };
+  no.onclick = () => { localStorage.setItem('notifyPromptDismissed', '1'); b.remove(); };
+  b.append(yes, no);
+  document.body.append(b);
+}
 
 // 新着メッセージのバナー（下部）
 function showNewMessageBanner() {

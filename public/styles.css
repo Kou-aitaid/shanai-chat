@@ -421,8 +421,22 @@ body {
 
 /* 未読チャンネル */
 .channel-list li.unread { font-weight: 800; color: #fff; }
-.channel-list li.unread::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #cd2553; margin-left: auto; }
-.channel-list li { display: flex; }
+.channel-list li { display: flex; align-items: center; }
+.unread-badge {
+  margin-left: auto; background: #cd2553; color: #fff; font-size: 11px; font-weight: 700;
+  min-width: 18px; height: 18px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px;
+}
+
+/* 通知許可バナー */
+.notify-prompt {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 360;
+  background: var(--sidebar-active); color: #fff; padding: 10px 14px; border-radius: 12px;
+  display: flex; align-items: center; gap: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.3); font-size: 14px;
+}
+.notify-prompt span { display: inline-flex; align-items: center; gap: 6px; }
+.notify-prompt button { border: none; border-radius: 8px; padding: 6px 12px; cursor: pointer; font-weight: 700; font-size: 13px; }
+.np-yes { background: #fff; color: var(--sidebar-active); }
+.np-no { background: rgba(255,255,255,.2); color: #fff; }
 
 /* ピン留めバッジ */
 .pin-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #b26a00; font-weight: 700; }
